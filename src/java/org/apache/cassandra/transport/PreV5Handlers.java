@@ -70,23 +70,18 @@ public class PreV5Handlers
         {
             // if we decide to handle this message, process it outside of the netty event loop
             if (shouldHandleRequest(ctx, request))
-                dispatcher.dispatch(ctx.channel(), request, this::toFlushItem);
+                dispatcher.dispatch(ctx.channel(), request, this::toFlushItem, this::release);
         }
 
         // Acts as a Dispatcher.FlushItemConverter
         private Flusher.FlushItem.Unframed toFlushItem(Channel channel, Message.Request request, Message.Response response)
         {
-            return new Flusher.FlushItem.Unframed(channel, response, request.getSource(), this::releaseItem);
+            return new Flusher.FlushItem.Unframed(channel, response);
         }
 
-        private void releaseItem(Flusher.FlushItem<Message.Response> item)
+        private void release(Channel channel, Envelope source)
         {
-            // Note: in contrast to the equivalent for V5 protocol, CQLMessageHandler::release(FlushItem item),
-            // this does not release the FlushItem's Message.Response. In V4, the buffers for the response's body
-            // and serialised header are emitted directly down the Netty pipeline from Envelope.Encoder, so
-            // releasing them is handled by the pipeline itself.
-            long itemSize = item.request.header.bodySizeInBytes;
-            item.request.release();
+            long itemSize = source.header.bodySizeInBytes;
 
             // since the request has been processed, decrement inflight payload at channel, endpoint and global levels
             channelPayloadBytesInFlight -= itemSize;
@@ -101,7 +96,7 @@ public class PreV5Handlers
             // note: this path is only relevant when part of a pre-V5 pipeline, as only in this case is
             // paused ever set to true. In pipelines configured for V5 or later, backpressure and control
             // over the inbound pipeline's autoread status are handled by the FrameDecoder/FrameProcessor.
-            ChannelConfig config = item.channel.config();
+            ChannelConfig config = channel.config();
             if (paused && (channelPayloadBytesInFlight == 0 || endpointGlobalReleaseOutcome == ResourceLimits.Outcome.BELOW_LIMIT))
             {
                 paused = false;

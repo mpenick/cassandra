@@ -49,49 +49,55 @@ abstract class Flusher implements Runnable
         Math.min(BufferPool.NORMAL_CHUNK_SIZE,
                  FrameEncoder.Payload.MAX_SIZE - Math.max(FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH, FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH));
 
-    static class FlushItem<T>
+    static abstract class FlushItem<T>
     {
         enum Kind {FRAMED, UNFRAMED}
 
         final Kind kind;
         final Channel channel;
         final T response;
-        final Envelope request;
-        final Consumer<FlushItem<T>> tidy;
 
-        FlushItem(Kind kind, Channel channel, T response, Envelope request, Consumer<FlushItem<T>> tidy)
+        FlushItem(Kind kind, Channel channel, T response)
         {
             this.kind = kind;
             this.channel = channel;
-            this.request = request;
             this.response = response;
-            this.tidy = tidy;
         }
 
-        void release()
-        {
-            tidy.accept(this);
-        }
+        abstract void release();
 
         static class Framed extends FlushItem<Envelope>
         {
             final FrameEncoder.PayloadAllocator allocator;
             Framed(Channel channel,
                    Envelope response,
-                   Envelope request,
-                   FrameEncoder.PayloadAllocator allocator,
-                   Consumer<FlushItem<Envelope>> tidy)
+                   FrameEncoder.PayloadAllocator allocator)
             {
-                super(Kind.FRAMED, channel, response, request, tidy);
+                super(Kind.FRAMED, channel, response);
                 this.allocator = allocator;
+            }
+
+            @Override
+            void release()
+            {
+                response.release();
             }
         }
 
         static class Unframed extends FlushItem<Response>
         {
-            Unframed(Channel channel, Response response, Envelope request, Consumer<FlushItem<Response>> tidy)
+            Unframed(Channel channel, Response response)
             {
-                super(Kind.UNFRAMED, channel, response, request, tidy);
+                super(Kind.UNFRAMED, channel, response);
+            }
+
+            @Override
+            void release()
+            {
+                // Note: in contrast to the equivalent for V5 protocol, CQLMessageHandler::release(FlushItem item),
+                // this does not release the FlushItem's Message.Response. In V4, the buffers for the response's body
+                // and serialised header are emitted directly down the Netty pipeline from Envelope.Encoder, so
+                // releasing them is handled by the pipeline itself.
             }
         }
     }

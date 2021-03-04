@@ -434,7 +434,7 @@ public class CQLConnectionTest
             this.frameEncoder = frameEncoder;
         }
 
-        public void accept(Channel channel, Message.Request message, Dispatcher.FlushItemConverter toFlushItem)
+        public void accept(Channel channel, Message.Request message, Dispatcher.FlushItemConverter toFlushItem, Dispatcher.CapacityUpdater updater)
         {
             if (flusher == null)
                 flusher = new SimpleClient.SimpleFlusher(frameEncoder);
@@ -445,6 +445,8 @@ public class CQLConnectionTest
                                                 ProtocolVersion.V5,
                                                 responseTemplate.header.flags,
                                                 responseTemplate.body.copy());
+
+            updater.update(channel, message.getSource());
             item.release();
             flusher.enqueue(response);
 

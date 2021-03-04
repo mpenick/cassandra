@@ -90,7 +90,7 @@ public class CQLMessageHandler<M extends Message> extends AbstractMessageHandler
 
     interface MessageConsumer<M extends Message>
     {
-        void accept(Channel channel, M message, Dispatcher.FlushItemConverter toFlushItem);
+        void accept(Channel channel, M message, Dispatcher.FlushItemConverter toFlushItem, Dispatcher.CapacityUpdater updater);
     }
 
     interface ErrorHandler
@@ -227,16 +227,13 @@ public class CQLMessageHandler<M extends Message> extends AbstractMessageHandler
 
     protected void processRequest(Envelope request)
     {
-        M message = null;
         try
         {
-            message = messageDecoder.decode(channel, request);
-            dispatcher.accept(channel, message, this::toFlushItem);
+            M message = messageDecoder.decode(channel, request);
+            dispatcher.accept(channel, message, this::toFlushItem, this::release);
         }
         catch (Exception e)
         {
-            if (message != null)
-                request.release();
             handleErrorAndRelease(e, request.header);
         }
     }
@@ -253,7 +250,7 @@ public class CQLMessageHandler<M extends Message> extends AbstractMessageHandler
      */
     private void handleErrorAndRelease(Throwable t, Envelope.Header header)
     {
-        release(header);
+        release(header.bodySizeInBytes);
         handleError(t, header);
     }
 
@@ -303,22 +300,18 @@ public class CQLMessageHandler<M extends Message> extends AbstractMessageHandler
 
         return new Framed(channel,
                           responseFrame,
-                          request.getSource(),
-                          payloadAllocator,
-                          this::release);
+                          payloadAllocator);
     }
 
-    private void release(Flusher.FlushItem<Envelope> flushItem)
+    private void release(Channel channel, Envelope source)
     {
-        release(flushItem.request.header);
-        flushItem.request.release();
-        flushItem.response.release();
+        release(source.header.bodySizeInBytes);
     }
 
-    private void release(Envelope.Header header)
+    private void release(long bodySizeInBytes)
     {
-        releaseCapacity(Ints.checkedCast(header.bodySizeInBytes));
-        channelPayloadBytesInFlight -= header.bodySizeInBytes;
+        releaseCapacity(Ints.checkedCast(bodySizeInBytes));
+        channelPayloadBytesInFlight -= bodySizeInBytes;
     }
 
     /*

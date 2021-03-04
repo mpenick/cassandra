@@ -429,7 +429,7 @@ public class SimpleClient implements Closeable
             FrameEncoder frameEncoder = frameEncoder(ctx);
             FrameEncoder.PayloadAllocator payloadAllocator = frameEncoder.allocator();
 
-            CQLMessageHandler.MessageConsumer<Message.Response> responseConsumer = (c, message, converter) -> {
+            CQLMessageHandler.MessageConsumer<Message.Response> responseConsumer = (c, message, converter, updater) -> {
                 responseHandler.handleResponse(c, message);
             };
 
@@ -511,7 +511,7 @@ public class SimpleClient implements Closeable
             pipeline.remove(this);
 
             Message.Response message = messageDecoder.decode(ctx.channel(), response);
-            responseConsumer.accept(channel, message, (ch, req, resp) -> null);
+            responseConsumer.accept(channel, message, (ch, req, resp) -> null, (ch, source) -> {});
         }
 
         private FrameDecoder frameDecoder(ChannelHandlerContext ctx, BufferPoolAllocator allocator)

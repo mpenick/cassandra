@@ -60,14 +60,19 @@ public class Dispatcher
         FlushItem<?> toFlushItem(Channel channel, Message.Request request, Message.Response response);
     }
 
+    interface CapacityUpdater
+    {
+        void update(Channel channel, Envelope source);
+    }
+
     public Dispatcher(boolean useLegacyFlusher)
     {
         this.useLegacyFlusher = useLegacyFlusher;
     }
 
-    public void dispatch(Channel channel, Message.Request request, FlushItemConverter forFlusher)
+    public void dispatch(Channel channel, Message.Request request, FlushItemConverter forFlusher, CapacityUpdater updater)
     {
-        requestExecutor.submit(() -> processRequest(channel, request, forFlusher));
+        requestExecutor.submit(() -> processRequest(channel, request, forFlusher, updater));
     }
 
     /**
@@ -94,7 +99,7 @@ public class Dispatcher
     /**
      * Note: this method is not expected to execute on the netty event loop.
      */
-    void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher)
+    void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher, CapacityUpdater updater)
     {
         final Message.Response response;
         final ServerConnection connection;
@@ -119,6 +124,12 @@ public class Dispatcher
         {
             ClientWarn.instance.resetWarnings();
         }
+
+        // There's little reason to hold on to the request buffer while flushing the response. It's often over allocated
+        // compared to the size of the actual request and can consume significant resources.
+        updater.update(channel, request.getSource());
+        request.getSource().release();
+
         flush(toFlush);
     }
 
@@ -152,7 +163,7 @@ public class Dispatcher
      * for delivering events to registered clients is dependent on protocol version and the configuration
      * of the pipeline. For v5 and newer connections, the event message is encoded into an Envelope,
      * wrapped in a FlushItem and then delivered via the pipeline's flusher, in a similar way to
-     * a Response returned from {@link #processRequest(Channel, Message.Request, FlushItemConverter)}.
+     * a Response returned from {@link #processRequest(Channel, Message.Request, FlushItemConverter, Tidy)}.
      * It's worth noting that events are not generally fired as a direct response to a client request,
      * so this flush item has a null request attribute. The dispatcher itself is created when the
      * pipeline is first configured during protocol negotiation and is attached to the channel for
@@ -167,8 +178,6 @@ public class Dispatcher
     {
         return eventMessage -> flush(new FlushItem.Framed(channel,
                                                           eventMessage.encode(version),
-                                                          null,
-                                                          allocator,
-                                                          f -> f.response.release()));
+                                                          allocator));
     }
 }
